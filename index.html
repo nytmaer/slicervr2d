@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SlicerVR - Simple Video Editor (Improved)</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 5px;
+        }
+
+        .subtitle {
+            color: #888;
+            font-size: 0.9em;
+        }
+
+        .file-section {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .btn-primary {
+            background: #0066ff;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn-primary:hover {
+            background: #0052cc;
+        }
+
+        .file-name {
+            margin-top: 10px;
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .player-section {
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        #videoPlayer {
+            width: 100%;
+            display: block;
+        }
+
+        .controls-section {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .playback-controls {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .btn-control {
+            background: #444;
+            color: white;
+            border: none;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            font-size: 20px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn-control:hover {
+            background: #555;
+        }
+
+        #volumeSlider {
+            flex: 0 0 150px;
+        }
+
+        #timeDisplay {
+            flex: 1;
+            text-align: right;
+            font-family: 'Courier New', monospace;
+            color: #888;
+        }
+
+        .timeline-section {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+        }
+
+        #timelineCanvas {
+            width: 100%;
+            height: 60px;
+            cursor: pointer;
+            display: block;
+            background: #1a1a1a;
+            border-radius: 4px;
+        }
+
+        #timelineCanvas:hover {
+            background: #222;
+        }
+
+        #timelineCanvas.dragging {
+            cursor: grabbing !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎬 SlicerVR</h1>
+            <p class="subtitle">Simple Video Editor (Improved Scrubbing)</p>
+        </header>
+
+        <!-- FILE PICKER -->
+        <div class="file-section">
+            <input type="file" id="videoFile" accept="video/*" style="display:none">
+            <button id="openFileBtn" class="btn-primary">Open Video File</button>
+            <p id="fileName" class="file-name"></p>
+        </div>
+
+        <!-- VIDEO PLAYER -->
+        <div class="player-section">
+            <video id="videoPlayer" controls></video>
+        </div>
+
+        <!-- CONTROLS -->
+        <div class="controls-section">
+            <div class="playback-controls">
+                <button id="playPauseBtn" class="btn-control">▶</button>
+                <input type="range" id="volumeSlider" min="0" max="100" value="100">
+                <span id="timeDisplay">0:00 / 0:00</span>
+            </div>
+        </div>
+
+        <!-- TIMELINE -->
+        <div class="timeline-section">
+            <canvas id="timelineCanvas" width="800" height="60"></canvas>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const videoFile = document.getElementById('videoFile');
+        const openFileBtn = document.getElementById('openFileBtn');
+        const fileName = document.getElementById('fileName');
+        const videoPlayer = document.getElementById('videoPlayer');
+        const playPauseBtn = document.getElementById('playPauseBtn');
+        const volumeSlider = document.getElementById('volumeSlider');
+        const timeDisplay = document.getElementById('timeDisplay');
+        const timelineCanvas = document.getElementById('timelineCanvas');
+        const ctx = timelineCanvas.getContext('2d');
+
+        let currentVideo = null;
+        let isDragging = false;
+        let wasPlaying = false;
+
+        // FILE LOADING
+        openFileBtn.addEventListener('click', () => {
+            videoFile.click();
+        });
+
+        videoFile.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            fileName.textContent = `Loaded: ${file.name} (${formatFileSize(file.size)})`;
+
+            const videoURL = URL.createObjectURL(file);
+            videoPlayer.src = videoURL;
+            currentVideo = file;
+
+            videoPlayer.addEventListener('loadedmetadata', () => {
+                console.log('Video loaded:', {
+                    duration: videoPlayer.duration,
+                    width: videoPlayer.videoWidth,
+                    height: videoPlayer.videoHeight
+                });
+                drawTimeline();
+            });
+        });
+
+        // PLAYBACK CONTROLS
+        playPauseBtn.addEventListener('click', () => {
+            if (videoPlayer.paused) {
+                videoPlayer.play();
+                playPauseBtn.textContent = '⏸';
+            } else {
+                videoPlayer.pause();
+                playPauseBtn.textContent = '▶';
+            }
+        });
+
+        volumeSlider.addEventListener('input', (e) => {
+            videoPlayer.volume = e.target.value / 100;
+        });
+
+        videoPlayer.addEventListener('timeupdate', () => {
+            const current = formatTime(videoPlayer.currentTime);
+            const total = formatTime(videoPlayer.duration);
+            timeDisplay.textContent = `${current} / ${total}`;
+            
+            // Only update timeline if not dragging
+            if (!isDragging) {
+                drawTimeline();
+            }
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' && currentVideo) {
+                e.preventDefault();
+                playPauseBtn.click();
+            }
+        });
+
+        // IMPROVED TIMELINE
+        function drawTimeline() {
+            const width = timelineCanvas.width;
+            const height = timelineCanvas.height;
+            
+            ctx.fillStyle = '#1a1a1a';
+            ctx.fillRect(0, 0, width, height);
+            
+            if (!videoPlayer.duration) return;
+            
+            // Progress bar background
+            ctx.fillStyle = '#333';
+            ctx.fillRect(10, 20, width - 20, 20);
+            
+            // Current progress
+            const progress = videoPlayer.currentTime / videoPlayer.duration;
+            ctx.fillStyle = '#0066ff';
+            ctx.fillRect(10, 20, (width - 20) * progress, 20);
+            
+            // Scrubber handle (LARGER and more visible)
+            const handleX = 10 + (width - 20) * progress;
+            
+            // Handle shadow for depth
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+            ctx.beginPath();
+            ctx.arc(handleX + 1, 31, 10, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Handle background
+            ctx.fillStyle = isDragging ? '#0066ff' : '#fff';
+            ctx.beginPath();
+            ctx.arc(handleX, 30, 10, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Handle border
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // Time markers
+            ctx.fillStyle = '#666';
+            ctx.font = '10px monospace';
+            for (let i = 0; i <= 10; i++) {
+                const x = 10 + (width - 20) * (i / 10);
+                const time = formatTime((videoPlayer.duration * i) / 10);
+                ctx.fillText(time, x - 15, 55);
+            }
+        }
+
+        // Seek to position helper
+        function seekToPosition(clientX) {
+            if (!videoPlayer.duration) return;
+            
+            const rect = timelineCanvas.getBoundingClientRect();
+            const x = clientX - rect.left;
+            const percent = (x - 10) / (timelineCanvas.width - 20);
+            const clampedPercent = Math.max(0, Math.min(1, percent));
+            
+            videoPlayer.currentTime = clampedPercent * videoPlayer.duration;
+            drawTimeline();
+        }
+
+        // Mouse down - start drag
+        timelineCanvas.addEventListener('mousedown', (e) => {
+            if (!videoPlayer.duration) return;
+            
+            isDragging = true;
+            timelineCanvas.classList.add('dragging');
+            
+            // Remember if video was playing
+            wasPlaying = !videoPlayer.paused;
+            
+            // Pause video while dragging for better control
+            if (wasPlaying) {
+                videoPlayer.pause();
+            }
+            
+            // Seek immediately on mousedown
+            seekToPosition(e.clientX);
+        });
+
+        // Mouse move - dragging
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            
+            seekToPosition(e.clientX);
+        });
+
+        // Mouse up - end drag
+        document.addEventListener('mouseup', () => {
+            if (!isDragging) return;
+            
+            isDragging = false;
+            timelineCanvas.classList.remove('dragging');
+            
+            // Resume playing if it was playing before
+            if (wasPlaying) {
+                videoPlayer.play();
+                playPauseBtn.textContent = '⏸';
+            }
+        });
+
+        // Click to seek (when not dragging)
+        timelineCanvas.addEventListener('click', (e) => {
+            // Click is handled by mousedown/mouseup, this is just for cleanup
+        });
+
+        // Handle canvas resize
+        window.addEventListener('resize', () => {
+            const rect = timelineCanvas.getBoundingClientRect();
+            timelineCanvas.width = rect.width;
+            drawTimeline();
+        });
+
+        // UTILITIES
+        function formatTime(seconds) {
+            if (!seconds || isNaN(seconds)) return '0:00';
+            
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function formatFileSize(bytes) {
+            const mb = bytes / (1024 * 1024);
+            return `${mb.toFixed(1)} MB`;
+        }
+
+        // INITIALIZATION
+        console.log('SlicerVR initialized - Improved scrubbing version');
+        console.log('Improvements:');
+        console.log('- Larger scrubber handle (easier to grab)');
+        console.log('- Video pauses while dragging');
+        console.log('- Smoother drag experience');
+        console.log('- Better visual feedback');
+        
+        const rect = timelineCanvas.getBoundingClientRect();
+        timelineCanvas.width = rect.width;
+        drawTimeline();
+    </script>
+</body>
+</html>
