@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SlicerVR - Simple Video Editor (Improved)</title>
+    <title>SlicerVR - Simple Video Editor</title>
     <style>
         * {
             margin: 0;
@@ -19,7 +19,7 @@
         }
 
         .container {
-            max-width: 900px;
+            max-width: 1200px;
             margin: 0 auto;
         }
 
@@ -58,21 +58,46 @@
             background: #0052cc;
         }
 
+        .btn-secondary {
+            background: #444;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 14px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s;
+            margin: 0 5px;
+        }
+
+        .btn-secondary:hover {
+            background: #555;
+        }
+
+        .btn-secondary.active {
+            background: #0066ff;
+        }
+
         .file-name {
             margin-top: 10px;
             color: #666;
             font-size: 0.9em;
         }
 
+        /* SMALLER VIDEO PLAYER */
         .player-section {
             background: #000;
             border-radius: 8px;
             overflow: hidden;
             margin-bottom: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
         }
 
         #videoPlayer {
-            width: 100%;
+            max-width: 100%;
+            max-height: 40vh; /* Less than half screen height */
             display: block;
         }
 
@@ -87,6 +112,7 @@
             display: flex;
             align-items: center;
             gap: 15px;
+            margin-bottom: 15px;
         }
 
         .btn-control {
@@ -116,6 +142,27 @@
             color: #888;
         }
 
+        /* TRIM CONTROLS */
+        .trim-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding-top: 15px;
+            border-top: 1px solid #444;
+        }
+
+        .trim-info {
+            flex: 1;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            color: #888;
+        }
+
+        .trim-info span {
+            color: #0066ff;
+            font-weight: bold;
+        }
+
         .timeline-section {
             background: #2a2a2a;
             padding: 20px;
@@ -124,7 +171,7 @@
 
         #timelineCanvas {
             width: 100%;
-            height: 60px;
+            height: 80px;
             cursor: pointer;
             display: block;
             background: #1a1a1a;
@@ -144,7 +191,7 @@
     <div class="container">
         <header>
             <h1>🎬 SlicerVR</h1>
-            <p class="subtitle">Simple Video Editor (Improved Scrubbing)</p>
+            <p class="subtitle">Simple Video Editor with Trim Tool</p>
         </header>
 
         <!-- FILE PICKER -->
@@ -154,9 +201,9 @@
             <p id="fileName" class="file-name"></p>
         </div>
 
-        <!-- VIDEO PLAYER -->
+        <!-- SMALLER VIDEO PLAYER (NO NATIVE CONTROLS) -->
         <div class="player-section">
-            <video id="videoPlayer" controls></video>
+            <video id="videoPlayer"></video>
         </div>
 
         <!-- CONTROLS -->
@@ -166,11 +213,21 @@
                 <input type="range" id="volumeSlider" min="0" max="100" value="100">
                 <span id="timeDisplay">0:00 / 0:00</span>
             </div>
+
+            <!-- TRIM CONTROLS -->
+            <div class="trim-controls">
+                <button id="setInBtn" class="btn-secondary">Set IN Point (I)</button>
+                <button id="setOutBtn" class="btn-secondary">Set OUT Point (O)</button>
+                <button id="clearBtn" class="btn-secondary">Clear Trim</button>
+                <div class="trim-info" id="trimInfo">
+                    No trim set
+                </div>
+            </div>
         </div>
 
         <!-- TIMELINE -->
         <div class="timeline-section">
-            <canvas id="timelineCanvas" width="800" height="60"></canvas>
+            <canvas id="timelineCanvas" width="800" height="80"></canvas>
         </div>
     </div>
 
@@ -185,10 +242,19 @@
         const timeDisplay = document.getElementById('timeDisplay');
         const timelineCanvas = document.getElementById('timelineCanvas');
         const ctx = timelineCanvas.getContext('2d');
+        
+        // Trim controls
+        const setInBtn = document.getElementById('setInBtn');
+        const setOutBtn = document.getElementById('setOutBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const trimInfo = document.getElementById('trimInfo');
 
+        // State
         let currentVideo = null;
         let isDragging = false;
         let wasPlaying = false;
+        let trimInPoint = null;  // IN point in seconds
+        let trimOutPoint = null; // OUT point in seconds
 
         // FILE LOADING
         openFileBtn.addEventListener('click', () => {
@@ -204,6 +270,11 @@
             const videoURL = URL.createObjectURL(file);
             videoPlayer.src = videoURL;
             currentVideo = file;
+
+            // Clear trim points when loading new video
+            trimInPoint = null;
+            trimOutPoint = null;
+            updateTrimInfo();
 
             videoPlayer.addEventListener('loadedmetadata', () => {
                 console.log('Video loaded:', {
@@ -235,20 +306,67 @@
             const total = formatTime(videoPlayer.duration);
             timeDisplay.textContent = `${current} / ${total}`;
             
-            // Only update timeline if not dragging
             if (!isDragging) {
                 drawTimeline();
             }
         });
 
+        // KEYBOARD SHORTCUTS
         document.addEventListener('keydown', (e) => {
-            if (e.code === 'Space' && currentVideo) {
+            if (!currentVideo) return;
+            
+            if (e.code === 'Space') {
                 e.preventDefault();
                 playPauseBtn.click();
+            } else if (e.code === 'KeyI') {
+                e.preventDefault();
+                setInBtn.click();
+            } else if (e.code === 'KeyO') {
+                e.preventDefault();
+                setOutBtn.click();
             }
         });
 
-        // IMPROVED TIMELINE
+        // TRIM CONTROLS
+        setInBtn.addEventListener('click', () => {
+            if (!videoPlayer.duration) return;
+            trimInPoint = videoPlayer.currentTime;
+            setInBtn.classList.add('active');
+            updateTrimInfo();
+            drawTimeline();
+        });
+
+        setOutBtn.addEventListener('click', () => {
+            if (!videoPlayer.duration) return;
+            trimOutPoint = videoPlayer.currentTime;
+            setOutBtn.classList.add('active');
+            updateTrimInfo();
+            drawTimeline();
+        });
+
+        clearBtn.addEventListener('click', () => {
+            trimInPoint = null;
+            trimOutPoint = null;
+            setInBtn.classList.remove('active');
+            setOutBtn.classList.remove('active');
+            updateTrimInfo();
+            drawTimeline();
+        });
+
+        function updateTrimInfo() {
+            if (trimInPoint === null && trimOutPoint === null) {
+                trimInfo.innerHTML = 'No trim set';
+            } else if (trimInPoint !== null && trimOutPoint !== null) {
+                const duration = trimOutPoint - trimInPoint;
+                trimInfo.innerHTML = `IN: <span>${formatTime(trimInPoint)}</span> | OUT: <span>${formatTime(trimOutPoint)}</span> | Duration: <span>${formatTime(duration)}</span>`;
+            } else if (trimInPoint !== null) {
+                trimInfo.innerHTML = `IN: <span>${formatTime(trimInPoint)}</span> | OUT: Not set`;
+            } else {
+                trimInfo.innerHTML = `IN: Not set | OUT: <span>${formatTime(trimOutPoint)}</span>`;
+            }
+        }
+
+        // TIMELINE WITH TRIM MARKERS
         function drawTimeline() {
             const width = timelineCanvas.width;
             const height = timelineCanvas.height;
@@ -260,29 +378,71 @@
             
             // Progress bar background
             ctx.fillStyle = '#333';
-            ctx.fillRect(10, 20, width - 20, 20);
+            ctx.fillRect(10, 30, width - 20, 20);
+            
+            // Trimmed area (if both IN and OUT are set)
+            if (trimInPoint !== null && trimOutPoint !== null) {
+                const inX = 10 + (width - 20) * (trimInPoint / videoPlayer.duration);
+                const outX = 10 + (width - 20) * (trimOutPoint / videoPlayer.duration);
+                
+                ctx.fillStyle = 'rgba(0, 200, 0, 0.3)';
+                ctx.fillRect(inX, 30, outX - inX, 20);
+            }
             
             // Current progress
             const progress = videoPlayer.currentTime / videoPlayer.duration;
             ctx.fillStyle = '#0066ff';
-            ctx.fillRect(10, 20, (width - 20) * progress, 20);
+            ctx.fillRect(10, 30, (width - 20) * progress, 20);
             
-            // Scrubber handle (LARGER and more visible)
+            // IN marker
+            if (trimInPoint !== null) {
+                const inX = 10 + (width - 20) * (trimInPoint / videoPlayer.duration);
+                
+                // Vertical line
+                ctx.strokeStyle = '#00ff00';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(inX, 15);
+                ctx.lineTo(inX, 55);
+                ctx.stroke();
+                
+                // Label
+                ctx.fillStyle = '#00ff00';
+                ctx.font = 'bold 12px Arial';
+                ctx.fillText('IN', inX - 8, 12);
+            }
+            
+            // OUT marker
+            if (trimOutPoint !== null) {
+                const outX = 10 + (width - 20) * (trimOutPoint / videoPlayer.duration);
+                
+                // Vertical line
+                ctx.strokeStyle = '#ff0000';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(outX, 15);
+                ctx.lineTo(outX, 55);
+                ctx.stroke();
+                
+                // Label
+                ctx.fillStyle = '#ff0000';
+                ctx.font = 'bold 12px Arial';
+                ctx.fillText('OUT', outX - 12, 12);
+            }
+            
+            // Scrubber handle
             const handleX = 10 + (width - 20) * progress;
             
-            // Handle shadow for depth
             ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
             ctx.beginPath();
-            ctx.arc(handleX + 1, 31, 10, 0, Math.PI * 2);
+            ctx.arc(handleX + 1, 41, 10, 0, Math.PI * 2);
             ctx.fill();
             
-            // Handle background
             ctx.fillStyle = isDragging ? '#0066ff' : '#fff';
             ctx.beginPath();
-            ctx.arc(handleX, 30, 10, 0, Math.PI * 2);
+            ctx.arc(handleX, 40, 10, 0, Math.PI * 2);
             ctx.fill();
             
-            // Handle border
             ctx.strokeStyle = '#000';
             ctx.lineWidth = 2;
             ctx.stroke();
@@ -293,11 +453,11 @@
             for (let i = 0; i <= 10; i++) {
                 const x = 10 + (width - 20) * (i / 10);
                 const time = formatTime((videoPlayer.duration * i) / 10);
-                ctx.fillText(time, x - 15, 55);
+                ctx.fillText(time, x - 15, 70);
             }
         }
 
-        // Seek to position helper
+        // Seek to position
         function seekToPosition(clientX) {
             if (!videoPlayer.duration) return;
             
@@ -310,52 +470,38 @@
             drawTimeline();
         }
 
-        // Mouse down - start drag
+        // Timeline interaction
         timelineCanvas.addEventListener('mousedown', (e) => {
             if (!videoPlayer.duration) return;
             
             isDragging = true;
             timelineCanvas.classList.add('dragging');
-            
-            // Remember if video was playing
             wasPlaying = !videoPlayer.paused;
             
-            // Pause video while dragging for better control
             if (wasPlaying) {
                 videoPlayer.pause();
             }
             
-            // Seek immediately on mousedown
             seekToPosition(e.clientX);
         });
 
-        // Mouse move - dragging
         document.addEventListener('mousemove', (e) => {
             if (!isDragging) return;
-            
             seekToPosition(e.clientX);
         });
 
-        // Mouse up - end drag
         document.addEventListener('mouseup', () => {
             if (!isDragging) return;
             
             isDragging = false;
             timelineCanvas.classList.remove('dragging');
             
-            // Resume playing if it was playing before
             if (wasPlaying) {
                 videoPlayer.play();
                 playPauseBtn.textContent = '⏸';
             }
         });
 
-        // Click to seek (when not dragging)
-        timelineCanvas.addEventListener('click', (e) => {
-            // Click is handled by mousedown/mouseup, this is just for cleanup
-        });
-
-        // Handle canvas resize
         window.addEventListener('resize', () => {
             const rect = timelineCanvas.getBoundingClientRect();
             timelineCanvas.width = rect.width;
@@ -377,12 +523,12 @@
         }
 
         // INITIALIZATION
-        console.log('SlicerVR initialized - Improved scrubbing version');
-        console.log('Improvements:');
-        console.log('- Larger scrubber handle (easier to grab)');
-        console.log('- Video pauses while dragging');
-        console.log('- Smoother drag experience');
-        console.log('- Better visual feedback');
+        console.log('SlicerVR initialized - Trim tool version');
+        console.log('Features:');
+        console.log('- Smaller video (max 40% screen height)');
+        console.log('- Single playback timeline');
+        console.log('- Set IN/OUT points for trimming');
+        console.log('- Keyboard: I = IN, O = OUT, Space = play/pause');
         
         const rect = timelineCanvas.getBoundingClientRect();
         timelineCanvas.width = rect.width;
