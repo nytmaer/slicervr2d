@@ -58,6 +58,11 @@
             background: #0052cc;
         }
 
+        .btn-primary:disabled {
+            background: #444;
+            cursor: not-allowed;
+        }
+
         .btn-secondary {
             background: #444;
             color: white;
@@ -78,13 +83,33 @@
             background: #0066ff;
         }
 
+        .btn-export {
+            background: #00aa00;
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            font-size: 15px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s;
+            font-weight: bold;
+        }
+
+        .btn-export:hover {
+            background: #008800;
+        }
+
+        .btn-export:disabled {
+            background: #444;
+            cursor: not-allowed;
+        }
+
         .file-name {
             margin-top: 10px;
             color: #666;
             font-size: 0.9em;
         }
 
-        /* SMALLER VIDEO PLAYER */
         .player-section {
             background: #000;
             border-radius: 8px;
@@ -97,7 +122,7 @@
 
         #videoPlayer {
             max-width: 100%;
-            max-height: 40vh; /* Less than half screen height */
+            max-height: 40vh;
             display: block;
         }
 
@@ -142,13 +167,13 @@
             color: #888;
         }
 
-        /* TRIM CONTROLS */
         .trim-controls {
             display: flex;
             align-items: center;
             gap: 10px;
             padding-top: 15px;
             border-top: 1px solid #444;
+            margin-bottom: 15px;
         }
 
         .trim-info {
@@ -163,10 +188,19 @@
             font-weight: bold;
         }
 
+        .export-section {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #444;
+        }
+
         .timeline-section {
             background: #2a2a2a;
             padding: 20px;
             border-radius: 8px;
+            margin-bottom: 20px;
         }
 
         #timelineCanvas {
@@ -185,13 +219,80 @@
         #timelineCanvas.dragging {
             cursor: grabbing !important;
         }
+
+        /* EXPORT PROGRESS */
+        .export-progress {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .export-progress.active {
+            display: block;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background: #1a1a1a;
+            border-radius: 15px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #0066ff, #00aaff);
+            width: 0%;
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .progress-message {
+            text-align: center;
+            color: #888;
+            margin-top: 10px;
+        }
+
+        .download-section {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            display: none;
+        }
+
+        .download-section.active {
+            display: block;
+        }
+
+        .download-link {
+            display: inline-block;
+            background: #00aa00;
+            color: white;
+            padding: 15px 30px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+
+        .download-link:hover {
+            background: #008800;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
             <h1>🎬 SlicerVR</h1>
-            <p class="subtitle">Simple Video Editor with Trim Tool</p>
+            <p class="subtitle">Simple Video Editor with Export</p>
         </header>
 
         <!-- FILE PICKER -->
@@ -201,7 +302,7 @@
             <p id="fileName" class="file-name"></p>
         </div>
 
-        <!-- SMALLER VIDEO PLAYER (NO NATIVE CONTROLS) -->
+        <!-- VIDEO PLAYER -->
         <div class="player-section">
             <video id="videoPlayer"></video>
         </div>
@@ -223,13 +324,39 @@
                     No trim set
                 </div>
             </div>
+
+            <!-- EXPORT SECTION -->
+            <div class="export-section">
+                <button id="exportBtn" class="btn-export" disabled>Export Trimmed Video</button>
+                <span id="exportInfo" style="color: #888; font-size: 13px;">Set IN and OUT points to enable export</span>
+            </div>
         </div>
 
         <!-- TIMELINE -->
         <div class="timeline-section">
             <canvas id="timelineCanvas" width="800" height="80"></canvas>
         </div>
+
+        <!-- EXPORT PROGRESS -->
+        <div class="export-progress" id="exportProgress">
+            <h3>⚙️ Processing Video...</h3>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill">0%</div>
+            </div>
+            <p class="progress-message" id="progressMessage">Initializing...</p>
+        </div>
+
+        <!-- DOWNLOAD SECTION -->
+        <div class="download-section" id="downloadSection">
+            <h3>✅ Export Complete!</h3>
+            <p style="color: #888; margin: 10px 0;">Your trimmed video is ready to download.</p>
+            <a id="downloadLink" class="download-link" download="trimmed-video.mp4">📥 Download Trimmed Video</a>
+        </div>
     </div>
+
+    <!-- FFmpeg.wasm -->
+    <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.6/dist/umd/ffmpeg.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
 
     <script>
         // DOM Elements
@@ -243,25 +370,69 @@
         const timelineCanvas = document.getElementById('timelineCanvas');
         const ctx = timelineCanvas.getContext('2d');
         
-        // Trim controls
         const setInBtn = document.getElementById('setInBtn');
         const setOutBtn = document.getElementById('setOutBtn');
         const clearBtn = document.getElementById('clearBtn');
         const trimInfo = document.getElementById('trimInfo');
+        const exportBtn = document.getElementById('exportBtn');
+        const exportInfo = document.getElementById('exportInfo');
+        
+        const exportProgress = document.getElementById('exportProgress');
+        const progressFill = document.getElementById('progressFill');
+        const progressMessage = document.getElementById('progressMessage');
+        const downloadSection = document.getElementById('downloadSection');
+        const downloadLink = document.getElementById('downloadLink');
 
         // State
         let currentVideo = null;
+        let currentVideoFile = null;
         let isDragging = false;
         let wasPlaying = false;
-        let trimInPoint = null;  // IN point in seconds
-        let trimOutPoint = null; // OUT point in seconds
+        let trimInPoint = null;
+        let trimOutPoint = null;
+
+        // FFmpeg
+        const { FFmpeg } = FFmpegWASM;
+        const { fetchFile } = FFmpegUtil;
+        let ffmpeg = null;
+        let ffmpegLoaded = false;
+
+        // Load FFmpeg
+        async function loadFFmpeg() {
+            if (ffmpegLoaded) return;
+            
+            try {
+                ffmpeg = new FFmpeg();
+                
+                ffmpeg.on('log', ({ message }) => {
+                    console.log(message);
+                });
+                
+                ffmpeg.on('progress', ({ progress, time }) => {
+                    const percent = Math.round(progress * 100);
+                    progressFill.style.width = percent + '%';
+                    progressFill.textContent = percent + '%';
+                    progressMessage.textContent = `Processing... (${formatTime(time / 1000000)})`;
+                });
+                
+                await ffmpeg.load({
+                    coreURL: "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.4/dist/umd/ffmpeg-core.js"
+                });
+                
+                ffmpegLoaded = true;
+                console.log('FFmpeg loaded successfully');
+            } catch (error) {
+                console.error('Failed to load FFmpeg:', error);
+                alert('Failed to load video processing library. Please refresh the page.');
+            }
+        }
 
         // FILE LOADING
         openFileBtn.addEventListener('click', () => {
             videoFile.click();
         });
 
-        videoFile.addEventListener('change', (e) => {
+        videoFile.addEventListener('change', async (e) => {
             const file = e.target.files[0];
             if (!file) return;
 
@@ -270,11 +441,16 @@
             const videoURL = URL.createObjectURL(file);
             videoPlayer.src = videoURL;
             currentVideo = file;
+            currentVideoFile = file;
 
-            // Clear trim points when loading new video
             trimInPoint = null;
             trimOutPoint = null;
+            setInBtn.classList.remove('active');
+            setOutBtn.classList.remove('active');
             updateTrimInfo();
+            updateExportButton();
+
+            downloadSection.classList.remove('active');
 
             videoPlayer.addEventListener('loadedmetadata', () => {
                 console.log('Video loaded:', {
@@ -284,6 +460,11 @@
                 });
                 drawTimeline();
             });
+
+            // Load FFmpeg in background
+            if (!ffmpegLoaded) {
+                loadFFmpeg();
+            }
         });
 
         // PLAYBACK CONTROLS
@@ -311,7 +492,6 @@
             }
         });
 
-        // KEYBOARD SHORTCUTS
         document.addEventListener('keydown', (e) => {
             if (!currentVideo) return;
             
@@ -333,6 +513,7 @@
             trimInPoint = videoPlayer.currentTime;
             setInBtn.classList.add('active');
             updateTrimInfo();
+            updateExportButton();
             drawTimeline();
         });
 
@@ -341,6 +522,7 @@
             trimOutPoint = videoPlayer.currentTime;
             setOutBtn.classList.add('active');
             updateTrimInfo();
+            updateExportButton();
             drawTimeline();
         });
 
@@ -350,6 +532,7 @@
             setInBtn.classList.remove('active');
             setOutBtn.classList.remove('active');
             updateTrimInfo();
+            updateExportButton();
             drawTimeline();
         });
 
@@ -366,7 +549,84 @@
             }
         }
 
-        // TIMELINE WITH TRIM MARKERS
+        function updateExportButton() {
+            if (trimInPoint !== null && trimOutPoint !== null && trimOutPoint > trimInPoint) {
+                exportBtn.disabled = false;
+                exportInfo.textContent = 'Ready to export!';
+                exportInfo.style.color = '#00aa00';
+            } else {
+                exportBtn.disabled = true;
+                exportInfo.textContent = 'Set IN and OUT points to enable export';
+                exportInfo.style.color = '#888';
+            }
+        }
+
+        // EXPORT FUNCTIONALITY
+        exportBtn.addEventListener('click', async () => {
+            if (!currentVideoFile || trimInPoint === null || trimOutPoint === null) return;
+            
+            try {
+                // Show progress
+                exportProgress.classList.add('active');
+                downloadSection.classList.remove('active');
+                exportBtn.disabled = true;
+                
+                progressFill.style.width = '0%';
+                progressFill.textContent = '0%';
+                progressMessage.textContent = 'Loading video processing...';
+                
+                // Ensure FFmpeg is loaded
+                if (!ffmpegLoaded) {
+                    await loadFFmpeg();
+                }
+                
+                progressMessage.textContent = 'Reading video file...';
+                
+                // Write input file
+                await ffmpeg.writeFile('input.mp4', await fetchFile(currentVideoFile));
+                
+                progressMessage.textContent = 'Trimming video...';
+                
+                // Calculate duration
+                const duration = trimOutPoint - trimInPoint;
+                
+                // Run FFmpeg trim command
+                await ffmpeg.exec([
+                    '-i', 'input.mp4',
+                    '-ss', trimInPoint.toString(),
+                    '-t', duration.toString(),
+                    '-c', 'copy',
+                    'output.mp4'
+                ]);
+                
+                progressMessage.textContent = 'Reading output...';
+                
+                // Read output file
+                const data = await ffmpeg.readFile('output.mp4');
+                
+                // Create download link
+                const blob = new Blob([data.buffer], { type: 'video/mp4' });
+                const url = URL.createObjectURL(blob);
+                
+                downloadLink.href = url;
+                downloadLink.download = `trimmed-${currentVideoFile.name}`;
+                
+                // Show download section
+                exportProgress.classList.remove('active');
+                downloadSection.classList.add('active');
+                exportBtn.disabled = false;
+                
+                console.log('Export complete!');
+                
+            } catch (error) {
+                console.error('Export failed:', error);
+                alert('Export failed: ' + error.message);
+                exportProgress.classList.remove('active');
+                exportBtn.disabled = false;
+            }
+        });
+
+        // TIMELINE
         function drawTimeline() {
             const width = timelineCanvas.width;
             const height = timelineCanvas.height;
@@ -376,11 +636,9 @@
             
             if (!videoPlayer.duration) return;
             
-            // Progress bar background
             ctx.fillStyle = '#333';
             ctx.fillRect(10, 30, width - 20, 20);
             
-            // Trimmed area (if both IN and OUT are set)
             if (trimInPoint !== null && trimOutPoint !== null) {
                 const inX = 10 + (width - 20) * (trimInPoint / videoPlayer.duration);
                 const outX = 10 + (width - 20) * (trimOutPoint / videoPlayer.duration);
@@ -389,16 +647,12 @@
                 ctx.fillRect(inX, 30, outX - inX, 20);
             }
             
-            // Current progress
             const progress = videoPlayer.currentTime / videoPlayer.duration;
             ctx.fillStyle = '#0066ff';
             ctx.fillRect(10, 30, (width - 20) * progress, 20);
             
-            // IN marker
             if (trimInPoint !== null) {
                 const inX = 10 + (width - 20) * (trimInPoint / videoPlayer.duration);
-                
-                // Vertical line
                 ctx.strokeStyle = '#00ff00';
                 ctx.lineWidth = 3;
                 ctx.beginPath();
@@ -406,17 +660,13 @@
                 ctx.lineTo(inX, 55);
                 ctx.stroke();
                 
-                // Label
                 ctx.fillStyle = '#00ff00';
                 ctx.font = 'bold 12px Arial';
                 ctx.fillText('IN', inX - 8, 12);
             }
             
-            // OUT marker
             if (trimOutPoint !== null) {
                 const outX = 10 + (width - 20) * (trimOutPoint / videoPlayer.duration);
-                
-                // Vertical line
                 ctx.strokeStyle = '#ff0000';
                 ctx.lineWidth = 3;
                 ctx.beginPath();
@@ -424,15 +674,12 @@
                 ctx.lineTo(outX, 55);
                 ctx.stroke();
                 
-                // Label
                 ctx.fillStyle = '#ff0000';
                 ctx.font = 'bold 12px Arial';
                 ctx.fillText('OUT', outX - 12, 12);
             }
             
-            // Scrubber handle
             const handleX = 10 + (width - 20) * progress;
-            
             ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
             ctx.beginPath();
             ctx.arc(handleX + 1, 41, 10, 0, Math.PI * 2);
@@ -447,7 +694,6 @@
             ctx.lineWidth = 2;
             ctx.stroke();
             
-            // Time markers
             ctx.fillStyle = '#666';
             ctx.font = '10px monospace';
             for (let i = 0; i <= 10; i++) {
@@ -457,7 +703,6 @@
             }
         }
 
-        // Seek to position
         function seekToPosition(clientX) {
             if (!videoPlayer.duration) return;
             
@@ -470,7 +715,6 @@
             drawTimeline();
         }
 
-        // Timeline interaction
         timelineCanvas.addEventListener('mousedown', (e) => {
             if (!videoPlayer.duration) return;
             
@@ -523,12 +767,7 @@
         }
 
         // INITIALIZATION
-        console.log('SlicerVR initialized - Trim tool version');
-        console.log('Features:');
-        console.log('- Smaller video (max 40% screen height)');
-        console.log('- Single playback timeline');
-        console.log('- Set IN/OUT points for trimming');
-        console.log('- Keyboard: I = IN, O = OUT, Space = play/pause');
+        console.log('SlicerVR initialized - Export functionality enabled');
         
         const rect = timelineCanvas.getBoundingClientRect();
         timelineCanvas.width = rect.width;
